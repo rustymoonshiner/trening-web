@@ -1,7 +1,7 @@
 /* Trening – telefon. Dziennik jedzenia w telefonie; „Update” wysyła wpisy do programu Trening na komputerze
    przez domowe Wi-Fi (API: /api/ping, /api/catalog, /api/days, /api/entries). Dane trzymane w localStorage. */
 "use strict";
-const VERSION = "1.1";
+const VERSION = "1.3";
 // Android (Capacitor) łączy się zwykłym http na port 8765; iPhone (Safari, strona https) – https na port 8766
 const NATIVE = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 const PORT_DEF = NATIVE ? 8765 : 8766;
@@ -75,6 +75,14 @@ function irLevel(n) {
   if (n.c > 45 || (su > 10 && fi < 3)) return 1;
   return 0;
 }
+/** Wszystkie wartości (makro, cukry, błonnik, sól, witaminy i minerały) dla ilości. */
+function nutrFull(snap, amount) {
+  const f = (snap.u === "g" || !snap.u) ? amount / 100 : amount;
+  const o = { kcal: (snap.k || 0) * f, protein: (snap.p || 0) * f, fat: (snap.f || 0) * f, carbs: (snap.c || 0) * f,
+              sugar: (snap.su || 0) * f, fiber: (snap.fi || 0) * f, salt: (snap.sa || 0) * f };
+  for (const [k, v] of Object.entries(snap.m || {})) o[k] = (o[k] || 0) + v * f;
+  return o;
+}
 const unitOf = (snap) => (snap.u === "g" || !snap.u) ? "g" : "porcji";
 
 // ------------------------------------------------------------------ widoki
@@ -105,14 +113,14 @@ function dayRows(d) {
       const e = pidToEntry[r.pid];
       if (e && e.deleted) return;
       rows.push({ meal: r.meal, name: r.name, amount: r.amount, unit: r.unit, kcal: r.kcal, pc: !e, entry: e || null,
-                  mac: null });
+                  mac: null, n: r.n || { kcal: r.kcal }, mf: r.mf || 0, id: e ? e.t + ":" + e.id : (r.ref || null) });
     });
   }
   mine.forEach((e) => {
     if (snap && e.pid && snap.rows.some((r) => r.pid === e.pid)) return;   // już w migawce
     const n = nutr(e.snap, e.amount);
     rows.push({ meal: e.meal, name: e.snap.n, amount: e.amount, unit: unitOf(e.snap), kcal: r0(n.k), entry: e,
-                mac: n, pc: false });
+                mac: n, pc: false, n: nutrFull(e.snap, e.amount), mf: e.snap.mf || 0, id: e.t + ":" + e.id });
   });
   return rows;
 }
@@ -163,6 +171,7 @@ function renderDay() {
     sec.appendChild(add);
     box.appendChild(sec);
   });
+  renderPane();
   const pend = entries.filter((e) => !e.synced).length;
   $("#pend").textContent = pend; $("#pend").classList.toggle("hide", !pend);
   $("#sync-info").textContent = cfg.token
@@ -174,6 +183,16 @@ function fmtAmount(a, u) {
   return u === "g" ? `${v} g` : `${v} ${v === 1 ? "porcja" : "porcji"}`;
 }
 
+let pane = "meals";
+$$("#seg button").forEach((b) => b.addEventListener("click", () => {
+  pane = b.dataset.pane;
+  $$("#seg button").forEach((x) => x.classList.toggle("on", x === b));
+  $$(".pane").forEach((p) => p.classList.toggle("on", p.id === (pane === "meals" ? "meals" : "pane-" + pane)));
+  renderPane();
+}));
+function renderPane() {
+  if (pane === "bal") renderBal(); else if (pane === "sug") renderSug(); else if (pane === "trend") renderTrend();
+}
 $("#d-prev").addEventListener("click", () => { curDate = addDays(curDate, -1); renderDay(); });
 $("#d-next").addEventListener("click", () => { curDate = addDays(curDate, 1); renderDay(); });
 $("#d-date").addEventListener("click", () => { curDate = today(); renderDay(); });
@@ -331,7 +350,8 @@ $("#m-ok").addEventListener("click", () => {
   } else {
     const it = sheet.item;
     const snap = { n: it.n, b: it.b || "", u: it.u || "g", pg: it.pg || null, pn: it.pn || null, k: it.k, p: it.p, f: it.f, c: it.c,
-                   su: it.su ?? null, fi: it.fi ?? null, sa: it.sa ?? null, lv: it.lv, why: it.why, e: it.e || sheet.ean || "" };
+                   su: it.su ?? null, fi: it.fi ?? null, sa: it.sa ?? null, lv: it.lv, why: it.why, e: it.e || sheet.ean || "",
+                   m: it.m || null, mf: it.mf || 0 };
     entries.push(newEntry(snap, it.t || "f", it.local ? null : it.id || null, a, meal, curDate, sheet.ean || it.e || ""));
     addMeal = meal;
   }
@@ -585,6 +605,305 @@ $("#p-clear").addEventListener("click", () => {
   entries = entries.filter((e) => !e.synced || e.date >= lim);
   save(); fillSettings(); toast(`Usunięto ${before - entries.length} starych wpisów (na komputerze zostają)`);
 });
+
+
+// ================================================================== BILANS (jak zakładka „Bilans” w programie)
+const BEFORE = "przed jedzeniem";
+const AFTER = { "Śniadanie": "po śniadaniu", "Brunch": "po brunchu", "Obiad": "po obiedzie", "Podwieczorek": "po podwieczorku",
+                "Kolacja": "po kolacji", "Przekąski": "po przekąskach" };
+const ACC = { "Śniadanie": "śniadanie", "Brunch": "brunch", "Obiad": "obiad", "Podwieczorek": "podwieczorek", "Kolacja": "kolację", "Przekąski": "przekąski" };
+const cpOverride = {};
+const fmtN = (v, ref) => { const r = Math.abs(ref ?? v); return (r >= 20 ? Math.round(v).toString() : (Math.round(v * 10) / 10).toString()).replace(".", ","); };
+
+/** Indeks ostatniego zjedzonego posiłku: dziś wg zwykłych godzin, wcześniej – cały dzień, przyszłość – nic. */
+function checkpoint(d) {
+  if (d in cpOverride) return cpOverride[d];
+  const ms = meals(), t = today();
+  if (d < t) return ms.length - 1;
+  if (d > t) return -1;
+  const times = (catalog.bal && catalog.bal.times) || {};
+  const now = new Date(), hm = now.getHours() * 60 + now.getMinutes();
+  let cur = -1;
+  ms.forEach((m, i) => { const x = (times[m] || "").split(":"); if (x.length === 2 && hm >= +x[0] * 60 + +x[1]) cur = i; });
+  return cur;
+}
+function sumRows(rs) {
+  const t = {}; let kAll = 0, kOk = 0;
+  rs.forEach((r) => {
+    for (const [k, v] of Object.entries(r.n || {})) t[k] = (t[k] || 0) + (v || 0);
+    const kc = (r.n && r.n.kcal) || r.kcal || 0; kAll += kc; if (r.mf) kOk += kc;
+  });
+  return { t, kAll, kOk };
+}
+/** Port bilans.status z programu → [znak, kolor, opis]. */
+function bstatus(key, goal, kind, fc, coverage) {
+  const B = catalog.bal;
+  if (goal == null || !kind) return ["·", "info", ""];
+  if (kind === "kcal") {
+    if (fc < (B.floor || 0)) return ["▼", "bad", `poniżej minimum ${r0(B.floor)}`];
+    if (fc > goal + 150) return ["▲", "warn", `ponad cel o ${r0(fc - goal)}`];
+    return ["✓", "ok", ""];
+  }
+  if (kind === "max") {
+    if (fc > goal * 1.0001) return ["▲", "bad", `ponad limit o ${fmtN(fc - goal, goal)}`];
+    if (fc > goal * 0.9) return ["!", "warn", "blisko limitu"];
+    return ["✓", "ok", ""];
+  }
+  if (kind === "range") {
+    if (goal && fc > goal * 1.25) return ["▲", "warn", "dużo"];
+    if (goal && fc < goal * 0.6) return ["▼", "info", "mało"];
+    return ["✓", "ok", ""];
+  }
+  const frac = goal ? fc / goal : 1;
+  if (frac >= 0.9) return ["✓", "ok", ""];
+  if (!["protein", "fiber"].includes(key) && coverage < 0.6) return ["?", "info", "niepełne dane"];
+  if (frac >= 0.7) return ["!", "warn", `brakuje ${fmtN(goal - fc, goal)}`];
+  return ["▼", "bad", `brakuje ${fmtN(goal - fc, goal)}`];
+}
+function dayBalance(d) {
+  const B = catalog.bal; if (!B) return null;
+  const ms = meals(), rows = dayRows(d), cp = checkpoint(d);
+  const eaten = sumRows(rows.filter((r) => ms.indexOf(r.meal) <= cp)), all = sumRows(rows);
+  const tot = ms.reduce((a, m) => a + (B.shares[m] || 0), 0) || 100;
+  const expFrac = ms.filter((m, i) => i <= cp).reduce((a, m) => a + (B.shares[m] || 0), 0) / tot;
+  const coverage = all.kAll ? all.kOk / all.kAll : 1;
+  const items = B.order.filter((k) => B.targets[k] && k !== "chol").map((k) => {
+    const [goal, kind, label, unit] = B.targets[k];
+    const fc = all.t[k] || 0, ea = eaten.t[k] || 0;
+    const [sym, col, desc] = bstatus(k, goal, kind, fc, coverage);
+    return { key: k, label, unit, goal, kind, eaten: ea, forecast: fc, expected: goal && kind !== "max" ? goal * expFrac : null,
+             sym, col, desc };
+  });
+  return { items, cp, coverage, rows, fc: all.t, tot: all };
+}
+const MACRO_KEYS = ["kcal", "protein", "fat", "carbs", "fiber", "sugar", "salt", "fasat"];
+function nbRow(it) {
+  const g = it.goal || 0, max = Math.max(g, it.forecast, 1);
+  const w = (v) => Math.min(100, (v / max) * 100) + "%";
+  const vals = g ? `${fmtN(it.eaten, g)} → ${fmtN(it.forecast, g)} / ${fmtN(g, g)} ${it.unit}` : `${fmtN(it.forecast, it.forecast)} ${it.unit}`;
+  return `<div class="nb"><div class="top"><b>${esc(it.label)}</b><span class="vals">${vals}</span></div>
+    <div class="nbar"><div class="f" style="width:${w(it.forecast)}"></div><div class="e ${it.col}" style="width:${w(it.eaten)}"></div>
+    ${it.expected ? `<div class="x" style="left:${w(it.expected)}"></div>` : ""}</div>
+    ${it.desc || it.sym !== "✓" ? `<div class="st st-${it.col}">${it.sym} ${esc(it.desc)}</div>` : ""}</div>`;
+}
+function renderBal() {
+  const box = $("#pane-bal");
+  const bal = dayBalance(curDate);
+  if (!bal) { box.innerHTML = `<div class="card muted">Bilans pojawi się po „Update” z programem w wersji 4.2 lub nowszej.</div>`; return; }
+  const ms = meals();
+  const opts = [`<option value="-1"${bal.cp === -1 ? " selected" : ""}>${BEFORE}</option>`]
+    .concat(ms.map((m, i) => `<option value="${i}"${bal.cp === i ? " selected" : ""}>${AFTER[m] || "po: " + m}</option>`)).join("");
+  const mac = bal.items.filter((i) => MACRO_KEYS.includes(i.key));
+  const mic = bal.items.filter((i) => !MACRO_KEYS.includes(i.key) && i.kind);
+  const info = bal.items.filter((i) => !MACRO_KEYS.includes(i.key) && !i.kind && i.forecast);
+  const bad = mic.filter((i) => i.col === "bad" || i.col === "warn");
+  box.innerHTML = `
+    <div class="card"><div class="cp">Punkt kontrolny <select id="cp-sel">${opts}</select></div>
+      <div class="legend">Pasek: ciemny = zjedzone do punktu kontrolnego, jasny = cały plan dnia, kreska = ile powinno być o tej porze.
+      Wartości: zjedzone → plan dnia / cel.</div></div>
+    <div class="card"><h3>Energia i makro</h3>${mac.map(nbRow).join("")}</div>
+    <div class="card"><h3>Witaminy i minerały</h3>
+      ${bal.coverage < 0.6 ? `<div class="note-w">Część jedzenia nie ma danych o witaminach (np. produkty z etykiety) – wyniki są zaniżone.</div>` : ""}
+      ${bad.length ? `<div class="muted small" style="margin-bottom:6px">Brakuje: ${bad.map((i) => esc(catalog.bal.short[i.key] || i.label)).join(", ")} – podpowiedzi w zakładce „Co zjeść”.</div>` : ""}
+      ${mic.map(nbRow).join("")}
+      ${info.map((i) => `<div class="nb"><div class="top"><b>${esc(i.label)}</b><span class="vals">${fmtN(i.forecast, i.forecast)} ${i.unit}</span></div></div>`).join("")}
+    </div>`;
+  $("#cp-sel").addEventListener("change", (e) => { cpOverride[curDate] = +e.target.value; renderBal(); });
+}
+
+// ================================================================== CO ZJEŚĆ (port bilans.suggest z programu)
+const sugOpt = store.get("sugopt", { noMeat: false, nevo: false });
+let sugMeal = null;
+function gramCap(it, dens) {
+  let cap = ["nabiał", "napój"].includes(it.cat) ? 400 : 300;
+  if (dens > 4) cap = 40; else if (dens > 2.5) cap = 70; else if (dens > 1.8) cap = 150;
+  else if (dens < 0.8 && !["nabiał", "napój"].includes(it.cat)) cap = 200;
+  return cap;
+}
+function amountFor(it, budget, singleCap) {
+  const porcja = it.t === "r" || it.u === "porcja";
+  const kc1 = porcja ? it.k : it.k / 100;
+  if (!(kc1 > 0)) return null;
+  const lim = Math.min(budget, singleCap), t = it.a;
+  if (porcja) {
+    let a = t || 1;
+    while (a * kc1 > lim * 1.2 && a > 0.5) a = Math.max(0.5, a - 0.5);
+    if (a * kc1 > lim * 1.5) return null;
+    a = Math.round(a * 2) / 2;
+    return [a, a * kc1];
+  }
+  const cap = gramCap(it, kc1);
+  let g = t || (it.pg && it.pg <= cap ? it.pg : null) || Math.min((lim * 0.6) / kc1, cap);
+  g = Math.min(g, cap);
+  if (g * kc1 > lim * 1.2) g = lim / kc1;
+  g = g >= 30 ? Math.round(g / 10) * 10 : Math.round(g / 5) * 5;
+  if (g < 15) return null;
+  return [g, g * kc1];
+}
+function gainsText(val, gaps, tg) {
+  const B = catalog.bal, parts = [];
+  if (val.protein) parts.push(`B ${r0(val.protein)} g`);
+  if ((val.fiber || 0) >= 2) parts.push(`błonnik ${r0(val.fiber)} g`);
+  const mic = [];
+  for (const k of Object.keys(B.weights)) {
+    if (k === "protein" || k === "fiber" || !(k in gaps) || !val[k]) continue;
+    const pct = (100 * val[k]) / tg[k][0];
+    if (pct >= 12) mic.push([pct, k]);
+  }
+  mic.sort((a, b) => b[0] - a[0]);
+  mic.slice(0, 3).forEach(([pct, k]) => parts.push(`${B.short[k] || k} ${r0(pct)}%`));
+  if ((val.salt || 0) >= 1) parts.push(`sól ${fmtN(val.salt, 1)} g`);
+  return parts.join(" · ");
+}
+function suggest(d, meal) {
+  const B = catalog.bal; if (!B) return null;
+  const tg = B.targets, bal = dayBalance(d), fc = bal.fc, ms = meals();
+  const kcGoal = tg.kcal[0];
+  let budget = kcGoal - (fc.kcal || 0), note = "";
+  if (budget < 120) {
+    note = budget < 0 ? `Plan dnia ma już ${r0(fc.kcal)} kcal (cel ${r0(kcGoal)}). Podpowiedzi są małe – lepiej zamienić coś z planu niż dokładać.`
+      : `Zostało tylko ${r0(budget)} kcal – podpowiedzi to małe porcje.`;
+    budget = 150;
+  }
+  budget = Math.max(budget, (B.floor || 0) - (fc.kcal || 0));
+  const ui = d === today() ? bal.cp : -1;
+  meal = meal || ms.find((m, i) => i > ui) || ms[ms.length - 1];
+  const ahead = new Set(ms.filter((m, i) => i > ui)); ahead.add(meal);
+  const part = (B.shares[meal] || 0) / ([...ahead].reduce((a, m) => a + (B.shares[m] || 0), 0) || 1);
+  const mealBudget = Math.max(150, Math.min(ahead.size > 1 ? budget * part : budget, 750));
+  const singleCap = Math.max(mealBudget * 0.65, 150);
+  const inDay = new Set(bal.rows.map((r) => r.id).filter(Boolean));
+  const gaps = {};
+  for (const k of Object.keys(B.weights)) if (tg[k] && tg[k][0]) { const g = tg[k][0] - (fc[k] || 0); if (g > 0) gaps[k] = g; }
+  const limits = { salt: tg.salt[0] - (fc.salt || 0), fasat: tg.fasat[0] - (fc.fasat || 0) };
+  const score = (val, kc, gp, lim, bud) => {
+    let s = 0;
+    for (const [k, w] of Object.entries(B.weights)) if (k in gp && val[k]) s += (w * Math.min(val[k], gp[k])) / tg[k][0];
+    for (const [k, ul] of Object.entries(B.upper)) { const over = (fc[k] || 0) + (val[k] || 0) - ul; if (over > 0) s -= (2 * over) / ul; }
+    for (const [k, w] of [["salt", 3], ["fasat", 2]]) { const over = (val[k] || 0) - Math.max(lim[k], 0); if (over > 0) s -= (w * over) / tg[k][0]; }
+    if (kc > bud) s -= (2 * (kc - bud)) / Math.max(bud, 100);
+    if ((val.sugar || 0) > 25) s -= 0.1 * ((val.sugar - 25) / 10);
+    const ir = irLevel({ c: val.carbs, su: val.sugar, fi: val.fiber });
+    if (ir === 2) s -= 0.5; else if (ir === 1) s -= 0.2;        // insulinooporność (profil ciąży)
+    return s;
+  };
+  const cands = [];
+  for (const it of catalog.items) {
+    if (it.nosug || !(it.k > 0) || inDay.has(it.t + ":" + it.id)) continue;
+    if (it.s === "NEVO" && !sugOpt.nevo) continue;
+    if (sugOpt.noMeat && it.meat) continue;
+    const am = amountFor(it, mealBudget, it.t === "r" ? mealBudget : singleCap);
+    if (!am) continue;
+    const val = nutrFull(it, am[0]);
+    let s = score(val, am[1], gaps, limits, mealBudget);
+    s += 0.04 * Math.log1p(it.x || 0) + (it.fav ? 0.04 : 0) - (it.s === "NEVO" ? 0.05 : 0);
+    cands.push({ s, it, amount: am[0], kcal: am[1], val });
+  }
+  cands.sort((a, b) => b.s - a.s);
+  const key = (it) => fold(it.n).split(/\s+/)[0].slice(0, 7);
+  const singles = [], seen = new Set();
+  for (const c of cands) {
+    if (c.s <= 0.02) break;
+    const k = key(c.it); if (seen.has(k)) continue; seen.add(k);
+    singles.push({ ...c, gains: gainsText(c.val, gaps, tg) });
+    if (singles.length >= 8) break;
+  }
+  const combo = [], gp = { ...gaps }, lim = { ...limits }; let bud = mealBudget; const used = new Set();
+  for (let n = 0; n < 3; n++) {
+    if (bud < 90) break;
+    let best = null;
+    for (const c of cands.slice(0, 400)) {
+      if (used.has(c.it.t + ":" + c.it.id) || c.kcal > bud * 1.15) continue;
+      if (combo.some((x) => key(x.it) === key(c.it))) continue;
+      const sc = score(c.val, c.kcal, gp, lim, bud);
+      if (sc > 0.02 && (!best || sc > best.sc)) best = { ...c, sc };
+    }
+    if (!best) break;
+    combo.push({ ...best, gains: gainsText(best.val, gp, tg) });
+    used.add(best.it.t + ":" + best.it.id);
+    for (const k of Object.keys(gp)) { gp[k] -= best.val[k] || 0; if (gp[k] <= 0) delete gp[k]; }
+    for (const k of Object.keys(lim)) lim[k] -= best.val[k] || 0;
+    bud -= best.kcal;
+  }
+  const inCombo = new Set(combo.map((c) => c.it.t + ":" + c.it.id));
+  return { meal, note, mealBudget, budget, gaps, combo, singles: singles.filter((c) => !inCombo.has(c.it.t + ":" + c.it.id)) };
+}
+function addSuggestion(c, meal) {
+  const it = c.it;
+  const snap = { n: it.n, b: it.b || "", u: it.u || "g", pg: it.pg || null, pn: it.pn || null, k: it.k, p: it.p, f: it.f, c: it.c,
+                 su: it.su ?? null, fi: it.fi ?? null, sa: it.sa ?? null, lv: it.lv, why: it.why, e: it.e || "", m: it.m || null, mf: it.mf || 0 };
+  entries.push(newEntry(snap, it.t, it.id, c.amount, meal, curDate, it.e || ""));
+}
+function sugRow(c, i, group) {
+  const u = c.it.t === "r" || c.it.u === "porcja" ? (c.amount === 1 ? "porcja" : "porcji") : "g";
+  return `<div class="sg"><div class="nm"><div>${c.it.t === "r" ? "📖 " : ""}${esc(c.it.n)}</div>
+    <div class="gain">${fmtN(c.amount, u === "g" ? c.amount : 1)} ${u} · ${r0(c.kcal)} kcal${c.gains ? " · " + esc(c.gains) : ""}</div></div>
+    <button class="plus" data-g="${group}" data-i="${i}" aria-label="Dodaj">+</button></div>`;
+}
+function renderSug() {
+  const box = $("#pane-sug");
+  if (!catalog.bal) { box.innerHTML = `<div class="card muted">Podpowiedzi pojawią się po „Update” z programem w wersji 4.2 lub nowszej.</div>`; return; }
+  const res = suggest(curDate, sugMeal);
+  const ms = meals();
+  const gl = Object.keys(res.gaps).sort((a, b) => (catalog.bal.weights[b] || 0) - (catalog.bal.weights[a] || 0)).slice(0, 5)
+    .map((k) => catalog.bal.short[k] || k);
+  const tot = res.combo.reduce((a, c) => a + c.kcal, 0);
+  box.innerHTML = `
+    <div class="card"><div class="cp">Na <select id="sg-meal">${ms.map((m) => `<option${m === res.meal ? " selected" : ""}>${esc(m)}</option>`).join("")}</select></div>
+      <div class="opts"><label><input type="checkbox" id="sg-nomeat"${sugOpt.noMeat ? " checked" : ""}> bez mięsa</label>
+        <label><input type="checkbox" id="sg-nevo"${sugOpt.nevo ? " checked" : ""}> także produkty NEVO</label></div>
+      ${res.note ? `<div class="note-w">${esc(res.note)}</div>` : ""}
+      ${gl.length ? `<div class="muted small" style="margin-top:6px">Braki wg planu dnia: ${gl.map(esc).join(", ")}. Budżet na ${esc(ACC[res.meal] || res.meal)}: ok. ${r0(res.mealBudget)} kcal.</div>` : ""}
+    </div>
+    ${res.combo.length ? `<div class="card"><h3>🍽 Propozycja (~${r0(tot)} kcal)</h3>${res.combo.map((c, i) => sugRow(c, i, "combo")).join("")}
+      <button class="btn primary big" id="sg-all">Dodaj cały zestaw</button></div>` : ""}
+    ${res.singles.length ? `<div class="card"><h3>Inne pasujące</h3>${res.singles.map((c, i) => sugRow(c, i, "singles")).join("")}</div>` : ""}
+    ${!res.combo.length && !res.singles.length ? `<div class="card muted">Plan dnia wygląda kompletnie – nie mam czego podpowiedzieć 🙂</div>` : ""}`;
+  $("#sg-meal").addEventListener("change", (e) => { sugMeal = e.target.value; renderSug(); });
+  $("#sg-nomeat").addEventListener("change", (e) => { sugOpt.noMeat = e.target.checked; store.set("sugopt", sugOpt); renderSug(); });
+  $("#sg-nevo").addEventListener("change", (e) => { sugOpt.nevo = e.target.checked; store.set("sugopt", sugOpt); renderSug(); });
+  box.querySelectorAll("button.plus").forEach((b) => b.addEventListener("click", () => {
+    const c = res[b.dataset.g][+b.dataset.i];
+    addMeal = res.meal;
+    openSheet({ item: { ...c.it, a: c.amount } });
+    $("#m-meal").value = res.meal;
+  }));
+  const all = $("#sg-all");
+  if (all) all.addEventListener("click", () => {
+    res.combo.forEach((c) => addSuggestion(c, res.meal)); save();
+    toast(`Dodano zestaw na ${ACC[res.meal] || res.meal}`); renderDay();
+  });
+}
+
+// ================================================================== TREND (14 dni)
+function renderTrend() {
+  const box = $("#pane-trend");
+  const goal = (catalog.bal && catalog.bal.targets.kcal[0]) || cfg.goal || 0;
+  const floor = (catalog.bal && catalog.bal.floor) || 0;
+  const pgoal = catalog.bal && catalog.bal.targets.protein ? catalog.bal.targets.protein[0] : 0;
+  const ds = []; for (let i = 13; i >= 0; i--) ds.push(addDays(today(), -i));
+  const data = ds.map((d) => { const t = sumRows(dayRows(d)).t; return { d, k: t.kcal || 0, p: t.protein || 0, has: !!days[d] || entries.some((e) => e.date === d) }; });
+  const W = 340, H = 160, pad = 24, bw = (W - pad) / ds.length;
+  const maxK = Math.max(goal * 1.2, ...data.map((x) => x.k), 500);
+  const y = (v) => H - 18 - (v / maxK) * (H - 30);
+  const bars = data.map((x, i) => {
+    const col = !x.has ? "var(--line)" : x.k > goal + 150 ? "var(--warn)" : floor && x.k < floor ? "var(--bad)" : "var(--ok)";
+    const dd = new Date(x.d + "T12:00:00");
+    return `<rect x="${pad + i * bw + 2}" y="${y(x.k)}" width="${bw - 4}" height="${Math.max(0, H - 18 - y(x.k))}" rx="3" fill="${col}"/>
+      <text x="${pad + i * bw + bw / 2}" y="${H - 4}" font-size="9" text-anchor="middle" fill="var(--muted)">${dd.getDate()}</text>`;
+  }).join("");
+  const line = (v, c, lab) => v ? `<line x1="${pad}" x2="${W}" y1="${y(v)}" y2="${y(v)}" stroke="${c}" stroke-dasharray="4 3"/>
+    <text x="2" y="${y(v) + 3}" font-size="9" fill="${c}">${lab}</text>` : "";
+  const known = data.filter((x) => x.has && x.k > 0 && x.d < today());
+  const avgK = known.length ? known.reduce((a, x) => a + x.k, 0) / known.length : 0;
+  const avgP = known.length ? known.reduce((a, x) => a + x.p, 0) / known.length : 0;
+  box.innerHTML = `<div class="card"><h3>Kalorie – 14 dni</h3>
+    <svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${bars}${line(goal, "var(--acc)", r0(goal))}${line(floor, "var(--bad)", r0(floor))}</svg>
+    <div class="legend">Zielony = w normie, pomarańczowy = ponad cel, czerwony = poniżej minimum, szary = brak danych (zrób Update).</div></div>
+    <div class="card"><h3>Średnio (pełne dni: ${known.length})</h3>
+    <div class="nb"><div class="top"><b>Energia</b><span class="vals">${r0(avgK)} / ${r0(goal)} kcal</span></div></div>
+    <div class="nb"><div class="top"><b>Białko</b><span class="vals">${r0(avgP)} / ${r0(pgoal)} g</span></div></div></div>`;
+}
 
 // ------------------------------------------------------------------ start
 if (!cfg.device) cfg.device = NATIVE ? "Telefon" : "iPhone";

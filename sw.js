@@ -1,6 +1,6 @@
 /* Tryb bez internetu dla wersji z Safari: pliki aplikacji w pamięci telefonu.
    Zmiana wersji (CACHE) = telefon pobierze nowe pliki przy najbliższym otwarciu z internetem. */
-const CACHE = "trening-1.1";
+const CACHE = "trening-1.3";
 const FILES = ["./", "index.html", "style.css", "app.js", "vendor/zxing.min.js", "manifest.webmanifest",
                "icons/apple-touch-icon.png", "icons/icon-192.png", "icons/icon-512.png"];
 self.addEventListener("install", (e) => {

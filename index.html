@@ -37,7 +37,16 @@
     <div class="ring"><div id="s-bar"></div></div>
   </div>
 
-  <div id="meals"></div>
+  <nav class="seg" id="seg">
+    <button data-pane="meals" class="on">Posiłki</button>
+    <button data-pane="bal">Bilans</button>
+    <button data-pane="sug">Co zjeść</button>
+    <button data-pane="trend">Trend</button>
+  </nav>
+  <div id="meals" class="pane on"></div>
+  <div id="pane-bal" class="pane"></div>
+  <div id="pane-sug" class="pane"></div>
+  <div id="pane-trend" class="pane"></div>
 
   <div class="sync">
     <button class="btn primary big" id="b-sync">⟳ Update <span id="pend" class="pill hide">0</span></button>
