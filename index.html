@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f6fb2">
+<title>Trening – jedzenie</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Trening">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ========== DZIEŃ ========== -->
+<section id="v-day" class="view on">
+  <header class="bar">
+    <button class="ic" id="d-prev" aria-label="Poprzedni dzień">‹</button>
+    <button class="date" id="d-date">Dziś</button>
+    <button class="ic" id="d-next" aria-label="Następny dzień">›</button>
+    <button class="ic gear" id="go-set" aria-label="Ustawienia">⚙</button>
+  </header>
+
+  <div class="sum">
+    <div class="sum-row">
+      <div><b id="s-goal">–</b><small>cel</small></div>
+      <div class="op">−</div>
+      <div><b id="s-eaten">0</b><small>zjedzone</small></div>
+      <div class="op">=</div>
+      <div><b id="s-left">–</b><small>zostało</small></div>
+    </div>
+    <div class="macros" id="s-mac">B 0 g · T 0 g · W 0 g</div>
+    <div class="ring"><div id="s-bar"></div></div>
+  </div>
+
+  <div id="meals"></div>
+
+  <div class="sync">
+    <button class="btn primary big" id="b-sync">⟳ Update <span id="pend" class="pill hide">0</span></button>
+    <div class="muted small" id="sync-info">Po powrocie do domu: Wi-Fi + włączony komputer z programem Trening.</div>
+  </div>
+</section>
+
+<!-- ========== DODAWANIE ========== -->
+<section id="v-add" class="view">
+  <header class="bar">
+    <button class="ic" data-back aria-label="Wróć">←</button>
+    <select id="a-meal" class="meal-sel"></select>
+    <button class="ic" id="a-scan" aria-label="Skanuj kod">▥</button>
+  </header>
+  <div class="search">
+    <input id="q" type="search" placeholder="Szukaj produktu lub przepisu…" autocomplete="off">
+  </div>
+  <div class="tabs" id="a-tabs">
+    <button data-tab="recent" class="on">Ostatnie</button>
+    <button data-tab="fav">Ulubione</button>
+    <button data-tab="recipes">Przepisy</button>
+  </div>
+  <div id="results" class="list"></div>
+  <div class="foot">
+    <button class="btn" id="a-quick">✎ Wpisz ręcznie</button>
+    <button class="btn" id="a-scan2">▥ Skanuj kod kreskowy</button>
+  </div>
+</section>
+
+<!-- ========== ILOŚĆ ========== -->
+<div id="sheet" class="sheet hide">
+  <div class="sheet-box">
+    <div class="sheet-title" id="m-name">Produkt</div>
+    <div class="muted small" id="m-info"></div>
+    <div class="amount">
+      <button class="ic round" id="m-minus">−</button>
+      <input id="m-amount" type="number" inputmode="decimal" step="any">
+      <span id="m-unit">g</span>
+      <button class="ic round" id="m-plus">+</button>
+    </div>
+    <div class="chips" id="m-chips"></div>
+    <div class="m-kcal"><b id="m-kcal">0</b> kcal <span class="muted" id="m-mac"></span></div>
+    <div class="det" id="m-det"></div>
+    <div class="pregbox hide" id="m-preg"></div>
+    <label class="row">Posiłek <select id="m-meal"></select></label>
+    <div class="row2">
+      <button class="btn danger hide" id="m-del">Usuń</button>
+      <button class="btn" id="m-cancel">Anuluj</button>
+      <button class="btn primary" id="m-ok">Dodaj</button>
+    </div>
+  </div>
+</div>
+
+<!-- ========== RĘCZNY WPIS ========== -->
+<section id="v-quick" class="view">
+  <header class="bar">
+    <button class="ic" data-back aria-label="Wróć">←</button>
+    <div class="title">Nowy produkt</div>
+  </header>
+  <div class="form">
+    <label>Nazwa <input id="f-name" placeholder="np. Baton proteinowy"></label>
+    <label>Kod kreskowy <input id="f-ean" inputmode="numeric" placeholder="opcjonalnie"></label>
+    <div class="muted small">Wartości z etykiety <b>na 100 g</b>:</div>
+    <div class="grid4">
+      <label>kcal <input id="f-k" type="number" inputmode="decimal" step="any"></label>
+      <label>Białko <input id="f-p" type="number" inputmode="decimal" step="any"></label>
+      <label>Tłuszcz <input id="f-f" type="number" inputmode="decimal" step="any"></label>
+      <label>Węgl. <input id="f-c" type="number" inputmode="decimal" step="any"></label>
+    </div>
+    <div class="grid4">
+      <label>Cukry <input id="f-su" type="number" inputmode="decimal" step="any"></label>
+      <label>Błonnik <input id="f-fi" type="number" inputmode="decimal" step="any"></label>
+      <label>Sól <input id="f-sa" type="number" inputmode="decimal" step="any"></label>
+      <label>Porcja g <input id="f-pg" type="number" inputmode="decimal" step="any"></label>
+    </div>
+    <div class="muted small">Produkt trafi do programu przy najbliższym „Update” i będzie w wyszukiwarce.</div>
+    <button class="btn primary big" id="f-ok">Dalej – ilość</button>
+  </div>
+</section>
+
+<!-- ========== USTAWIENIA ========== -->
+<section id="v-set" class="view">
+  <header class="bar">
+    <button class="ic" data-back aria-label="Wróć">←</button>
+    <div class="title">Ustawienia</div>
+  </header>
+  <div class="form">
+    <h3>Parowanie z programem</h3>
+    <div class="muted small">W programie na komputerze: Ustawienia → „📱 Telefon przez Wi-Fi…” → „🔑 Sparuj telefon”.
+      Wpisz adres i PIN, które pokaże program.</div>
+    <label>Adres komputera <input id="p-host" placeholder="192.168.1.20:8765" inputmode="url"></label>
+    <label>PIN <input id="p-pin" inputmode="numeric" maxlength="7" placeholder="123 456"></label>
+    <label>Nazwa tego telefonu <input id="p-dev" placeholder="np. Telefon Pata"></label>
+    <button class="btn primary big" id="p-ok">Sparuj</button>
+    <div id="p-state" class="note"></div>
+
+    <h3>Komputery</h3>
+    <div id="hosts" class="muted small"></div>
+
+    <h3>Dane w telefonie</h3>
+    <div id="stats" class="muted small"></div>
+    <button class="btn" id="p-clear">Usuń wysłane wpisy starsze niż 14 dni</button>
+    <div class="muted small ver">Trening – telefon · <span id="ver"></span></div>
+  </div>
+</section>
+
+<!-- ========== SKANER ========== -->
+<div id="scan" class="scan hide">
+  <video id="video" playsinline muted></video>
+  <div class="scan-frame"></div>
+  <div class="scan-bar">
+    <span id="scan-msg">Skieruj aparat na kod kreskowy</span>
+    <button class="btn" id="scan-x">Zamknij</button>
+  </div>
+</div>
+
+<div id="toast" class="toast hide"></div>
+
+<script src="vendor/zxing.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
