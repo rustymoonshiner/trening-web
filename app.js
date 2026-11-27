@@ -1,7 +1,7 @@
 /* Trening – telefon. Dziennik jedzenia w telefonie; „Update” wysyła wpisy do programu Trening na komputerze
    przez domowe Wi-Fi (API: /api/ping, /api/catalog, /api/days, /api/entries). Dane trzymane w localStorage. */
 "use strict";
-const VERSION = "1.3";
+const VERSION = "1.4";
 // Android (Capacitor) łączy się zwykłym http na port 8765; iPhone (Safari, strona https) – https na port 8766
 const NATIVE = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 const PORT_DEF = NATIVE ? 8765 : 8766;
